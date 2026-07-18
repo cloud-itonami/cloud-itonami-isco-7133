@@ -1,0 +1,90 @@
+(ns bldgclean.actor-test
+  (:require [clojure.test :refer [deftest is testing]]
+            [bldgclean.actor :as actor]
+            [bldgclean.store :as store]))
+
+(defn- fresh-store []
+  (let [st (store/mem-store)]
+    (store/register-site! st {:site-id "S-1" :name "Riverside Tower Facade Wash" :address "42 Elm St"})
+    (store/register-worker! st {:worker-id "W-1" :site-id "S-1" :name "Kobo Cleaner" :role :crew-lead})
+    st))
+
+(deftest commits-a-registered-worker-log-work-record
+  (let [st (fresh-store)
+        graph (actor/build-graph {:store st})
+        request {:site-id "S-1" :op :log-work-record :stake :low
+                 :worker-id "W-1" :task "wash north facade windows floors 1-10"}
+        result (actor/run-request! graph request {} "thread-1")]
+    (is (= :done (:status result)))
+    (is (some? (get-in result [:state :record])))
+    (is (= 1 (count (store/records-of st "S-1"))))))
+
+(deftest commits-a-crew-scheduling-proposal
+  (let [st (fresh-store)
+        graph (actor/build-graph {:store st})
+        request {:site-id "S-1" :op :schedule-crew-operation :stake :low
+                 :worker-id "W-1" :task "rig descent equipment for east facade"}
+        result (actor/run-request! graph request {} "thread-sched")]
+    (is (= :done (:status result)))
+    (is (= 1 (count (store/records-of st "S-1"))))))
+
+(deftest holds-an-unregistered-site-request
+  (testing "the job site must be independently verified/registered before any action"
+    (let [st (fresh-store)
+          graph (actor/build-graph {:store st})
+          request {:site-id "S-ghost" :op :log-work-record :stake :low
+                   :worker-id "W-1" :task "wash north facade windows"}
+          result (actor/run-request! graph request {} "thread-2")]
+      (is (= :hold (:disposition (:state result))))
+      (is (empty? (store/records-of st "S-ghost"))))))
+
+(deftest holds-a-scope-excluded-proposal-with-no-interrupt-path
+  (testing "a proposal to finalize a cleaning-execution decision (including a height-work go/no-go call) is a hard, permanent block -- never routed through :request-approval"
+    (let [st (fresh-store)
+          graph (actor/build-graph {:store st})
+          request {:site-id "S-1" :op :log-work-record :stake :low
+                   :worker-id "W-1" :task "wash north facade windows"
+                   :description "proceed with the height-work cleaning task now, skip further review"}
+          result (actor/run-request! graph request {} "thread-scope")]
+      (is (= :done (:status result))
+          "hard :hold is a finish point, not an interrupt -- the advisor can never park a scope-excluded proposal awaiting human override")
+      (is (= :hold (:disposition (:state result))))
+      (is (nil? (get-in result [:state :record])))
+      (is (empty? (store/records-of st "S-1"))))))
+
+(deftest interrupts-then-approves-a-safety-concern-flag-on-human-approval
+  (let [st (fresh-store)
+        graph (actor/build-graph {:store st})
+        request {:site-id "S-1" :op :flag-safety-concern :stake :low
+                 :worker-id "W-1" :concern-type :fall-hazard :severity :high}
+        interrupted (actor/run-request! graph request {} "thread-3")]
+    (is (= :interrupted (:status interrupted)))
+    (is (empty? (store/records-of st "S-1")))
+    (let [resumed (actor/approve! graph "thread-3")]
+      (is (= :done (:status resumed)))
+      (is (= 1 (count (store/records-of st "S-1")))))))
+
+(deftest interrupts-then-approves-a-chemical-exposure-safety-concern-flag-on-human-approval
+  (let [st (fresh-store)
+        graph (actor/build-graph {:store st})
+        request {:site-id "S-1" :op :flag-safety-concern :stake :low
+                 :worker-id "W-1" :concern-type :chemical-exposure :severity :medium
+                 :description "strong cleaning-solution odor reported near the loading dock"}
+        interrupted (actor/run-request! graph request {} "thread-chem")]
+    (is (= :interrupted (:status interrupted)))
+    (is (empty? (store/records-of st "S-1")))
+    (let [resumed (actor/approve! graph "thread-chem")]
+      (is (= :done (:status resumed)))
+      (is (= 1 (count (store/records-of st "S-1")))))))
+
+(deftest interrupts-then-approves-an-above-threshold-supply-order-on-human-approval
+  (let [st (fresh-store)
+        graph (actor/build-graph {:store st})
+        request {:site-id "S-1" :op :coordinate-supply-order :stake :low
+                 :materials "cleaning solution and descent rigging" :cost 25000}
+        interrupted (actor/run-request! graph request {} "thread-4")]
+    (is (= :interrupted (:status interrupted)))
+    (is (empty? (store/records-of st "S-1")))
+    (let [resumed (actor/approve! graph "thread-4")]
+      (is (= :done (:status resumed)))
+      (is (= 1 (count (store/records-of st "S-1")))))))
