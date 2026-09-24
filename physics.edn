@@ -1,0 +1,31 @@
+;; What this vertical's robot physically does, declared for
+;; kotoba.robotics.process (kotoba-lang/robotics). `kbb -M:physics` runs it.
+;;
+;; README "Robotics premise": a job-site scheduling/logistics coordination
+;; robot for building structure cleaners (ISCO 7133) logs work records,
+;; proposes crew schedules, surfaces safety concerns and coordinates
+;; cleaning materials/equipment orders; it never cleans. Its physical work is
+;; equipment logistics for facade washing: staging the high-pressure hose run
+;; up the facade and emptying the wash-water recovery tank.
+;;
+;; Every number without a cited source is marked `estimate` in its :basis.
+;; Replacing an estimate with a sourced value is this bot's growth work.
+{:physics/schema "itonami.physical-ai.spec.v1"
+ :repo "cloud-itonami/cloud-itonami-isco-7133"
+ :cases
+ [{:id :facade-wash-hose
+   :kind :pipe-flow
+   :procedure "robot stages a 30 m high-pressure hose (ID 8 mm) from the pressure washer on the ground to the cleaning cradle 12 m up the facade; the nozzle flow is swept"
+   :params {:diameter-m 0.008 :length-m 30.0 :roughness-m 1.5e-6 :elevation-m 12.0}
+   :sweep {:param :q-m3s :values [0.00010 0.00015 0.00020 0.00025 0.00030 0.00040]}
+   :quantity :pressure-drop-pa
+   :limit {:max 2.0e6 :basis "estimate: accept losing at most ~20 bar of a ~150 bar pressure washer between pump and nozzle"}
+   :boundary {:lo 0.00005 :hi 0.0006}}
+  {:id :recovery-tank-empty
+   :kind :tank-drain
+   :procedure "robot empties the 1000 L wash-water recovery tank (IBC, 1.0 m x 1.2 m) by gravity into the approved discharge point before the next drop; the outlet valve bore is swept"
+   :params {:tank-area-m2 1.2 :h0-m 0.85 :h-target-m 0.05 :cd 0.62}
+   :sweep {:param :orifice-area-m2 :values [0.0005 0.001 0.002 0.003 0.005]}
+   :quantity :time-to-target-s
+   :limit {:max 900.0 :basis "estimate: the tank must be emptied within the 15-minute changeover between facade drops"}
+   :boundary {:lo 0.0002 :hi 0.01}}]}
