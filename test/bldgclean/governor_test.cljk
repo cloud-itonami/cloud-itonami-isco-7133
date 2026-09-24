@@ -1,5 +1,5 @@
 (ns bldgclean.governor-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [bldgclean.store :as store]
             [bldgclean.advisor :as advisor]
             [bldgclean.governor :as governor]))
